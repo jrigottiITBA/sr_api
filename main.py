@@ -21,6 +21,18 @@ def close_db(exception=None):
         db.close()
 
 # ******************************************************************
+# Route /api/init
+# Para generar la tabla de libros agregador por rating_avg
+# ******************************************************************
+@app.route('/api/init')
+def api_init():
+    return jsonify({
+        "status": "ok",
+        "data": "pong"
+    })
+
+
+# ******************************************************************
 # Route /api/ping
 # ******************************************************************
 @app.route('/api/ping')
