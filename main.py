@@ -6,13 +6,35 @@ import os
 app = Flask(__name__)
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data.db')
 
+# ******************************************************************
 # Funcion get db controller
+# ******************************************************************
 def get_db():
     """Reutiliza la conexión dentro del mismo request."""
     if 'db' not in g:
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row  # permite acceder por nombre de columna
     return g.db
+
+
+
+# ******************************************************************
+# Funcion recomendar_popularidad
+# ******************************************************************
+def recomendar_popularidad(n_recomendaciones, id_lector):
+    db = get_db()
+    cursor = db.execute(
+        """
+        SELECT id_libro 
+        FROM libros
+        WHERE id_libro NOT IN (SELECT id_libro FROM interacciones WHERE id_lector = ?)
+        ORDER BY random()
+        LIMIT ?
+        """, [id_lector, n_recomendaciones])
+    rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]
+
 
 @app.teardown_appcontext
 def close_db(exception=None):
@@ -44,6 +66,37 @@ def api_ping():
 
 
 # ******************************************************************
+# Route: /api/recomendar_todos
+# Method: POST
+# Type: Path Parameters
+# parameters in url:
+#  /n_recomendaciones /id_lector
+#
+# Ejemplo_1: /api/recomendar
+
+# ******************************************************************
+@app.route('/api/recomendar_todos/<int:n_recomendaciones>', methods=['POST'])
+def api_recomendar_todos(n_recomendaciones):
+    payload = request.get_json()
+    if not payload or 'lectores' not in payload:
+        return jsonify({"status": "error", "message": "Se requiere JSON con la clave 'lectores'"}), 400
+
+    lectores = payload['lectores']
+    if not lectores:
+        return jsonify({"status": "error", "message": "La lista de lectores no puede estar vacía"}), 400
+
+    recomendaciones = []
+    for lector_id in lectores:
+        recomendaciones.append({'lector_id': lector_id, 'recomendacion': recomendar_popularidad(n_recomendaciones, lector_id)})
+
+    return jsonify({
+        "status": "ok",
+        "recomendaciones": recomendaciones,
+    })
+
+
+
+# ******************************************************************
 # Route: /api/recomendar
 # Type: Path Parameters
 # parameters in url:
@@ -69,8 +122,6 @@ def api_recomendar_path_params(n_recomendaciones, id_lector):
         "status": "ok",
         "recomendaciones": [dict(row) for row in rows],
     })
-
-
 
 # ******************************************************************
 # Route: /api/recomendar
