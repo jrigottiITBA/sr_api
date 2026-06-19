@@ -67,7 +67,7 @@ def api_recomendar_path_params(n_recomendaciones, id_lector):
 
     return jsonify({
         "status": "ok",
-        "data": [dict(row) for row in rows],
+        "recomendacion": [dict(row) for row in rows],
     })
 
 
