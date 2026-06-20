@@ -17,7 +17,6 @@ def get_db():
     return g.db
 
 
-
 # ******************************************************************
 # Funcion recomendar_popularidad
 # ******************************************************************
@@ -25,11 +24,18 @@ def recomendar_popularidad(n_recomendaciones, id_lector):
     db = get_db()
     cursor = db.execute(
         """
-        SELECT id_libro 
-        FROM libros
-        WHERE id_libro NOT IN (SELECT id_libro FROM interacciones WHERE id_lector = ?)
-        ORDER BY random()
-        LIMIT ?
+        SELECT
+            r.id_libro
+        FROM ranking_libros r
+        WHERE r.id_libro NOT IN (
+            SELECT i.id_libro
+            FROM interacciones i
+            WHERE i.id_lector = ?
+        )
+        ORDER BY
+            r.rating_promedio DESC,
+            r.cantidad_ratings DESC
+        LIMIT ?;
         """, [id_lector, n_recomendaciones])
     rows = cursor.fetchall()
 
@@ -48,9 +54,50 @@ def close_db(exception=None):
 # ******************************************************************
 @app.route('/api/init')
 def api_init():
+    db = get_db()
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS ranking_libros (
+            id_libro TEXT PRIMARY KEY,
+            titulo TEXT,
+            autor TEXT,
+            rating_promedio REAL,
+            cantidad_ratings INTEGER
+        )
+    """)
+
+    db.execute("DELETE FROM ranking_libros")
+
+    db.execute("""
+        INSERT INTO ranking_libros (
+            id_libro,
+            titulo,
+            autor,
+            rating_promedio,
+            cantidad_ratings
+        )
+        SELECT
+            l.id_libro,
+            l.titulo,
+            l.autor,
+            AVG(i.rating) AS rating_promedio,
+            COUNT(*) AS cantidad_ratings
+        FROM libros l
+        INNER JOIN interacciones i
+            ON l.id_libro = i.id_libro
+        GROUP BY
+            l.id_libro,
+            l.titulo,
+            l.autor
+    """)
+
+    db.commit()
+
+    total = db.execute("SELECT COUNT(*) FROM ranking_libros").fetchone()[0]
+
     return jsonify({
         "status": "ok",
-        "data": "pong"
+        "data": f"ranking_libros inicializada con {total} libros"
     })
 
 
@@ -107,20 +154,11 @@ def api_recomendar_todos(n_recomendaciones):
 @app.route('/api/recomendar/<int:n_recomendaciones>/<string:id_lector>')
 def api_recomendar_path_params(n_recomendaciones, id_lector):
 
-    db = get_db()
-    cursor = db.execute(
-        """
-        SELECT id_libro 
-        FROM libros
-        WHERE id_libro NOT IN (SELECT id_libro FROM interacciones WHERE id_lector = ?)
-        ORDER BY random()
-        LIMIT ?
-        """, [id_lector, n_recomendaciones])
-    rows = cursor.fetchall()
+    recomendaciones = recomendar_popularidad(n_recomendaciones, id_lector)
 
     return jsonify({
         "status": "ok",
-        "recomendaciones": [dict(row) for row in rows],
+        "recomendaciones": recomendaciones,
     })
 
 # ******************************************************************
