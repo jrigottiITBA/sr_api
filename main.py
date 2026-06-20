@@ -134,7 +134,7 @@ def api_recomendar_todos(n_recomendaciones):
 
     recomendaciones = []
     for id_lector in lectores:
-        recomendaciones.append({'lector_id': id_lector, 'recomendacion': recomendar_popularidad(n_recomendaciones, id_lector)})
+        recomendaciones.append({'id_lector': id_lector, 'recomendacion': recomendar_popularidad(n_recomendaciones, id_lector)})
 
     return jsonify({
         "status": "ok",
