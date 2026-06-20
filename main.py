@@ -39,7 +39,7 @@ def recomendar_popularidad(n_recomendaciones, id_lector):
         """, [id_lector, n_recomendaciones])
     rows = cursor.fetchall()
 
-    return [dict(row) for row in rows]
+    return [row["id_libro"] for row in rows]
 
 
 @app.teardown_appcontext
@@ -133,8 +133,8 @@ def api_recomendar_todos(n_recomendaciones):
         return jsonify({"status": "error", "message": "La lista de lectores no puede estar vacía"}), 400
 
     recomendaciones = []
-    for lector_id in lectores:
-        recomendaciones.append({'lector_id': lector_id, 'recomendacion': recomendar_popularidad(n_recomendaciones, lector_id)})
+    for id_lector in lectores:
+        recomendaciones.append({'lector_id': id_lector, 'recomendacion': recomendar_popularidad(n_recomendaciones, id_lector)})
 
     return jsonify({
         "status": "ok",
