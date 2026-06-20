@@ -125,10 +125,10 @@ def api_ping():
 @app.route('/api/recomendar_todos/<int:n_recomendaciones>', methods=['POST'])
 def api_recomendar_todos(n_recomendaciones):
     payload = request.get_json()
-    if not payload or 'lectores' not in payload:
-        return jsonify({"status": "error", "message": "Se requiere JSON con la clave 'lectores'"}), 400
+    if not payload or 'id_lectores' not in payload:
+        return jsonify({"status": "error", "message": "Se requiere JSON con la clave 'id_lectores'"}), 400
 
-    lectores = payload['lectores']
+    lectores = payload['id_lectores']
     if not lectores:
         return jsonify({"status": "error", "message": "La lista de lectores no puede estar vacía"}), 400
 
