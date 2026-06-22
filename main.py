@@ -33,8 +33,7 @@ def recomendar_popularidad(n_recomendaciones, id_lector):
             WHERE i.id_lector = ?
         )
         ORDER BY
-            r.rating_promedio DESC,
-            r.cantidad_ratings DESC
+            r.score DESC
         LIMIT ?;
         """, [id_lector, n_recomendaciones])
     rows = cursor.fetchall()
@@ -56,13 +55,16 @@ def close_db(exception=None):
 def api_init():
     db = get_db()
 
+    # db.execute("DROP TABLE ranking_libros")
+
     db.execute("""
         CREATE TABLE IF NOT EXISTS ranking_libros (
             id_libro TEXT PRIMARY KEY,
             titulo TEXT,
             autor TEXT,
             rating_promedio REAL,
-            cantidad_ratings INTEGER
+            cantidad_ratings INTEGER,
+            score REAL
         )
     """)
 
@@ -74,21 +76,22 @@ def api_init():
             titulo,
             autor,
             rating_promedio,
-            cantidad_ratings
+            cantidad_ratings,
+            score
         )
         SELECT
             l.id_libro,
             l.titulo,
             l.autor,
-            AVG(i.rating) AS rating_promedio,
-            COUNT(*) AS cantidad_ratings
+            AVG(i.rating)                                           AS rating_promedio,
+            COUNT(*)                                                AS cantidad_ratings,
+            (COUNT(*) * AVG(i.rating) + prior.global_avg * 25)
+                / (COUNT(*) + 25)                                   AS score
         FROM libros l
-        INNER JOIN interacciones i
-            ON l.id_libro = i.id_libro
-        GROUP BY
-            l.id_libro,
-            l.titulo,
-            l.autor
+        INNER JOIN interacciones i ON l.id_libro = i.id_libro
+        CROSS JOIN (SELECT AVG(rating) AS global_avg FROM interacciones) prior
+        GROUP BY l.id_libro, l.titulo, l.autor
+        ORDER BY score DESC
     """)
 
     db.commit()
