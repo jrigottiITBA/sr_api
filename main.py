@@ -4,7 +4,7 @@ import sqlite3
 import os
 
 app = Flask(__name__)
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data.db')
+DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data','data.db')
 
 # ******************************************************************
 # Funcion get db controller
@@ -15,6 +15,21 @@ def get_db():
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row  # permite acceder por nombre de columna
     return g.db
+
+
+# ******************************************************************
+# Funcion elegir_estrategia
+# Decide qué algoritmo usar según el historial del lector
+# ******************************************************************
+def elegir_estrategia(id_lector, db):
+    n_interacciones = db.execute(
+        "SELECT COUNT(*) FROM interacciones WHERE id_lector = ?",
+        [id_lector]
+    ).fetchone()[0]
+
+    if n_interacciones < 10:
+        return "popularidad"   # arranque en frio
+    return "perfil"
 
 
 # ******************************************************************
@@ -39,6 +54,84 @@ def recomendar_popularidad(n_recomendaciones, id_lector):
     rows = cursor.fetchall()
 
     return [row["id_libro"] for row in rows]
+
+
+
+# ******************************************************************
+# Funcion construir_perfil
+# Construye el perfil de un lector basado en sus interacciones
+# Retorna dos dicts: {genero: peso} y {autor: peso}
+# El peso es AVG(rating)/10 normalizado, con minimo 3 interacciones
+# ******************************************************************
+def construir_perfil(id_lector, db):
+    # perfil de generos
+    cursor = db.execute("""
+        SELECT l.genero, AVG(i.rating) / 10.0 AS peso
+        FROM interacciones i
+        JOIN libros l ON i.id_libro = l.id_libro
+        WHERE i.id_lector = ?
+        GROUP BY l.genero
+        HAVING COUNT(*) >= 3
+        ORDER BY COUNT(*) DESC
+        LIMIT 10
+    """, [id_lector])
+    rows = cursor.fetchall()
+    generos = {row["genero"]: row["peso"] for row in rows}
+    total = sum(generos.values())
+    if total > 0:
+        generos = {k: v / total for k, v in generos.items()}
+
+    # perfil de autores
+    cursor = db.execute("""
+        SELECT l.autor, AVG(i.rating) / 10.0 AS peso
+        FROM interacciones i
+        JOIN libros l ON i.id_libro = l.id_libro
+        WHERE i.id_lector = ?
+        GROUP BY l.autor
+        HAVING COUNT(*) >= 3
+        ORDER BY COUNT(*) DESC
+        LIMIT 10
+    """, [id_lector])
+    rows = cursor.fetchall()
+    autores = {row["autor"]: row["peso"] for row in rows}
+    total = sum(autores.values())
+    if total > 0:
+        autores = {k: v / total for k, v in autores.items()}
+
+    return generos, autores
+
+
+# ******************************************************************
+# Funcion recomendar_perfil
+# Recomienda libros basados en el perfil del lector
+# score = peso_genero + peso_autor
+# ******************************************************************
+def recomendar_perfil(n_recomendaciones, id_lector):
+    db = get_db()
+    generos, autores = construir_perfil(id_lector, db)
+
+    # obtener libros no leidos
+    cursor = db.execute("""
+        SELECT id_libro, genero, autor
+        FROM libros
+        WHERE id_libro NOT IN (
+            SELECT id_libro FROM interacciones WHERE id_lector = ?
+        )
+    """, [id_lector])
+    libros = cursor.fetchall()
+
+    # calcular score de cada libro
+    scored = []
+    for libro in libros:
+        score = generos.get(libro["genero"], 0.0) + autores.get(libro["autor"], 0.0)
+        if score > 0:
+            scored.append((libro["id_libro"], score))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"  scored total: {len(scored)}")
+    print(f"  top 5: {scored[:5]}")
+    return [id_libro for id_libro, _ in scored[:n_recomendaciones]]
 
 
 @app.teardown_appcontext
@@ -156,12 +249,20 @@ def api_recomendar_todos(n_recomendaciones):
 # ******************************************************************
 @app.route('/api/recomendar/<int:n_recomendaciones>/<string:id_lector>')
 def api_recomendar_path_params(n_recomendaciones, id_lector):
+    db = get_db()
+    estrategia = elegir_estrategia(id_lector, db)
 
-    recomendaciones = recomendar_popularidad(n_recomendaciones, id_lector)
+    if estrategia == "popularidad":
+        recomendaciones = recomendar_popularidad(n_recomendaciones, id_lector)
+    elif estrategia == "perfil":
+        recomendaciones = recomendar_perfil(n_recomendaciones, id_lector)
+
+    print(f"  estrategia: {estrategia}, recomendaciones: {len(recomendaciones)}")
 
     return jsonify({
         "status": "ok",
         "recomendaciones": recomendaciones,
+        "estrategia": estrategia
     })
 
 # ******************************************************************
