@@ -221,16 +221,24 @@ def api_ping():
 @app.route('/api/recomendar_todos/<int:n_recomendaciones>', methods=['POST'])
 def api_recomendar_todos(n_recomendaciones):
     payload = request.get_json()
-    if not payload or 'id_lectores' not in payload:
-        return jsonify({"status": "error", "message": "Se requiere JSON con la clave 'id_lectores'"}), 400
 
     lectores = payload['id_lectores']
     if not lectores:
         return jsonify({"status": "error", "message": "La lista de lectores no puede estar vacía"}), 400
-
+    
+    db = get_db()
     recomendaciones = []
     for id_lector in lectores:
-        recomendaciones.append({'id_lector': id_lector, 'recomendacion': recomendar_popularidad(n_recomendaciones, id_lector)})
+        estrategia = elegir_estrategia(id_lector, db)
+        if estrategia == "popularidad":
+            recs = recomendar_popularidad(n_recomendaciones, id_lector)
+        elif estrategia == "perfil":
+            recs = recomendar_perfil(n_recomendaciones, id_lector)
+        recomendaciones.append({
+            'id_lector': id_lector,
+            'recomendacion': recs,
+            'estrategia': estrategia
+        })
 
     return jsonify({
         "status": "ok",
