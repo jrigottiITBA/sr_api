@@ -2,11 +2,13 @@ import requests
 import sqlite3
 import math
 from os import path
+from datetime import datetime
 
 # ******************************************************************
 # Configuracion
 # ******************************************************************
 BASE_URL = "http://localhost:5000"
+# BASE_URL = "https://jrigottiitba.pythonanywhere.com/"
 THIS_FOLDER = path.dirname(path.abspath(__file__))
 DB_PATH = path.join(THIS_FOLDER, "data", "data.db")
 DB_TEST_PATH = path.join(THIS_FOLDER, "data", "data_test.db")
@@ -97,7 +99,6 @@ def test_recomendar():
     recomendaciones = []
     for id_lector in id_lectores:
         res = requests.get(f"{BASE_URL}{endpoint}/{N}/{id_lector}", timeout=60)
-
         assert res.status_code == 200, f"status code esperado 200, recibido {res.status_code}"
         assert res.headers.get("content-type") == "application/json", "no devolvió JSON"
         j = res.json()
@@ -160,9 +161,12 @@ if __name__ == "__main__":
     print("=" * 50)
 
     try:
+        start_time = datetime.now()
         test_ping()
         test_init()
         recomendaciones = test_recomendar()
+        end_time = datetime.now()
+        print(f"Total time: {round((end_time - start_time).total_seconds(), 2)}")
         calcular_ndcg(recomendaciones)
         print("\n" + "=" * 50)
         print("  RESULTADO: OK")

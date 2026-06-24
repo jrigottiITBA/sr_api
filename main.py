@@ -2,9 +2,13 @@
 from flask import Flask, jsonify, g, request
 import sqlite3
 import os
+import pickle
 
 app = Flask(__name__)
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data','data.db')
+RANKING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'ranking.pkl')
+LIBROS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'libros.pkl')
+libros_cache = []  # variable global
 
 # ******************************************************************
 # Funcion get db controller
@@ -37,23 +41,22 @@ def elegir_estrategia(id_lector, db):
 # ******************************************************************
 def recomendar_popularidad(n_recomendaciones, id_lector):
     db = get_db()
-    cursor = db.execute(
-        """
-        SELECT
-            r.id_libro
-        FROM ranking_libros r
-        WHERE r.id_libro NOT IN (
-            SELECT i.id_libro
-            FROM interacciones i
-            WHERE i.id_lector = ?
-        )
-        ORDER BY
-            r.score DESC
-        LIMIT ?;
-        """, [id_lector, n_recomendaciones])
-    rows = cursor.fetchall()
 
-    return [row["id_libro"] for row in rows]
+    # cargar ranking precalculado desde pickle (lista ordenada por score)
+    with open(RANKING_PATH, 'rb') as f:
+        ranking = pickle.load(f)
+
+    # libros ya leidos por el lector
+    leidos = set(
+        row["id_libro"] for row in db.execute(
+            "SELECT id_libro FROM interacciones WHERE id_lector = ?",
+            [id_lector]
+        ).fetchall()
+    )
+
+    # filtrar leidos y retornar top-N
+    recomendaciones = [id_libro for id_libro in ranking if id_libro not in leidos]
+    return recomendaciones[:n_recomendaciones]
 
 
 
@@ -107,30 +110,34 @@ def construir_perfil(id_lector, db):
 # score = peso_genero + peso_autor
 # ******************************************************************
 def recomendar_perfil(n_recomendaciones, id_lector):
+    global libros_cache
     db = get_db()
+
+    # cargar libros desde cache
+    if not libros_cache:
+        with open(LIBROS_PATH, 'rb') as f:
+            libros_cache = pickle.load(f)
+
     generos, autores = construir_perfil(id_lector, db)
 
-    # obtener libros no leidos
-    cursor = db.execute("""
-        SELECT id_libro, genero, autor
-        FROM libros
-        WHERE id_libro NOT IN (
-            SELECT id_libro FROM interacciones WHERE id_lector = ?
-        )
-    """, [id_lector])
-    libros = cursor.fetchall()
+    # libros ya leidos
+    leidos = set(
+        row["id_libro"] for row in db.execute(
+            "SELECT id_libro FROM interacciones WHERE id_lector = ?",
+            [id_lector]
+        ).fetchall()
+    )
 
-    # calcular score de cada libro
+    # scoring sobre cache en memoria, sin SQL
     scored = []
-    for libro in libros:
+    for libro in libros_cache:
+        if libro["id_libro"] in leidos:
+            continue
         score = generos.get(libro["genero"], 0.0) + autores.get(libro["autor"], 0.0)
         if score > 0:
             scored.append((libro["id_libro"], score))
 
     scored.sort(key=lambda x: x[1], reverse=True)
-
-    print(f"  scored total: {len(scored)}")
-    print(f"  top 5: {scored[:5]}")
     return [id_libro for id_libro, _ in scored[:n_recomendaciones]]
 
 
@@ -142,40 +149,16 @@ def close_db(exception=None):
 
 # ******************************************************************
 # Route /api/init
-# Para generar la tabla de libros agregador por rating_avg
+# Para generar la tabla de libros agregados por rating_avg
 # ******************************************************************
 @app.route('/api/init')
 def api_init():
     db = get_db()
 
-    # db.execute("DROP TABLE ranking_libros")
-
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS ranking_libros (
-            id_libro TEXT PRIMARY KEY,
-            titulo TEXT,
-            autor TEXT,
-            rating_promedio REAL,
-            cantidad_ratings INTEGER,
-            score REAL
-        )
-    """)
-
-    db.execute("DELETE FROM ranking_libros")
-
-    db.execute("""
-        INSERT INTO ranking_libros (
-            id_libro,
-            titulo,
-            autor,
-            rating_promedio,
-            cantidad_ratings,
-            score
-        )
+    # calcular ranking
+    rows = db.execute("""
         SELECT
             l.id_libro,
-            l.titulo,
-            l.autor,
             AVG(i.rating)                                           AS rating_promedio,
             COUNT(*)                                                AS cantidad_ratings,
             (COUNT(*) * AVG(i.rating) + prior.global_avg * 25)
@@ -183,17 +166,24 @@ def api_init():
         FROM libros l
         INNER JOIN interacciones i ON l.id_libro = i.id_libro
         CROSS JOIN (SELECT AVG(rating) AS global_avg FROM interacciones) prior
-        GROUP BY l.id_libro, l.titulo, l.autor
+        GROUP BY l.id_libro
         ORDER BY score DESC
     """)
 
-    db.commit()
+    # guardar en disco como lista de id_libros ordenados
+    ranking = [row["id_libro"] for row in rows]
+    with open(RANKING_PATH, 'wb') as f:
+        pickle.dump(ranking, f)
 
-    total = db.execute("SELECT COUNT(*) FROM ranking_libros").fetchone()[0]
+    # guardar todos los libros en pickle
+    libros = db.execute("SELECT id_libro, genero, autor FROM libros").fetchall()
+    libros_list = [{"id_libro": r["id_libro"], "genero": r["genero"], "autor": r["autor"]} for r in libros]
+    with open(LIBROS_PATH, 'wb') as f:
+        pickle.dump(libros_list, f)
 
     return jsonify({
         "status": "ok",
-        "data": f"ranking_libros inicializada con {total} libros"
+        "data": f"ranking inicializado con {len(ranking)} libros"
     })
 
 
